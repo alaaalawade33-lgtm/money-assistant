@@ -10,7 +10,7 @@ FILE_NAME = "money_data.json"
 PROFILE_FILE = "income_profile.json"
 OPENAI_MODEL = "gpt-4o-mini"
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = ""
 
 CATEGORIES = ["طعام", "مواصلات", "تسوق", "فواتير", "ترفيه", "صحة", "تعليم", "أخرى"]
 
