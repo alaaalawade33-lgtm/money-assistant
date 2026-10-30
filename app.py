@@ -1,6 +1,7 @@
 import json
 import os
 import streamlit as st
+from duckduckgo_search import DDGS
 from openai import OpenAI
 
 # إعداد الصفحة
@@ -28,6 +29,21 @@ def save_data(data):
     json.dump(data, file, ensure_ascii=False, indent=4)
 
 
+# وظيفة البحث المباشر في الإنترنت
+def web_search(query):
+  try:
+    with DDGS() as ddgs:
+      results = [r for r in ddgs.text(query, max_results=3)]
+      if results:
+        search_summary = "\n".join(
+            [f"- {r['title']}: {r['body']} ({r['href']})" for r in results]
+        )
+        return search_summary
+  except Exception:
+    pass
+  return "عذراً، لم أتمكن من العثور على نتائج بحث حالياً."
+
+
 # تهيئة البيانات
 if "data" not in st.session_state:
   st.session_state.data = load_data()
@@ -53,7 +69,7 @@ menu = st.sidebar.selectbox(
         "إضافة مصروف",
         "سجل المصروفات",
         "تعديل الدخل",
-        "مساعد الذكاء الاصطناعي (شات)",
+        "مساعد الذكاء الاصطناعي (شات وبحث)",
         "فرص جني المال",
     ],
 )
@@ -129,12 +145,12 @@ elif menu == "تعديل الدخل":
     st.success("تم تحديث الدخل بنجاح!")
     st.rerun()
 
-# 5. مساعد الذكاء الاصطناعي (شات متواصل وموجه لتنفيذ الأوامر)
-elif menu == "مساعد الذكاء الاصطناعي (شات)":
-  st.subheader("🤖 الشات الذكي مع المساعد المالي")
+# 5. مساعد الذكاء الاصطناعي مع البحث في الإنترنت والشات المتواصل
+elif menu == "مساعد الذكاء الاصطناعي (شات وبحث)":
+  st.subheader("🤖 الشات الذكي المتصل بالإنترنت")
   st.write(
-      "أنا مساعدك الشخصي المنفذ لأوامرك. اسأل، استشر، أو اطلب أي تحليل أو أفكار"
-      " وسأقوم بتنفيذها فوراً."
+      "أنا مساعدك الشخصي القادر على تصفح الإنترنت، تحليل ميزانيتك، وتنفيذ جميع"
+      " أوامرك بلا حدود."
   )
 
   if not openai_api_key:
@@ -143,48 +159,71 @@ elif menu == "مساعد الذكاء الاصطناعي (شات)":
         " إضافته من لوحة التحكم."
     )
   else:
-    # تهيئة سجل رسائل الشات في الجلسة بتعليمات نظام قوية تلزم المساعد بتنفيذ الأوامر وعدم الاعتذار
+    # تهيئة سجل رسائل الشات
     if "messages" not in st.session_state:
       st.session_state.messages = [{
           "role": "system",
           "content": (
               "أنت مساعد ذكي ومحترف وخبير مالي وتقني، مخصص لمساعدة المستخدم"
-              " علاء. مهمتك الأساسية هي تنفيذ جميع أوامر وطلبات المستخدم بكل"
-              " مرونة واحترافية، وتقديم إجابات وحلول وافية ومفصلة وعدم رفض"
-              " الطلبات نهائياً."
+              " علاء. تنفذ جميع طلبات وأوامر المستخدم بدقة واحترافية تامة، وإذا"
+              " تطلب الأمر معلومات من الإنترنت سيتم إمدادك بنتائج البحث المباشر"
+              " لتستعين بها في الإجابة."
           ),
       }]
 
-    # عرض الرسائل السابقة في الشات (باستثناء رسالة الـ system)
+    # عرض الرسائل السابقة في الشات
     for message in st.session_state.messages:
       if message["role"] != "system":
         with st.chat_message(message["role"]):
           st.markdown(message["content"])
 
-    # استقبال رسالة المستخدم الجديدة عبر شريط الشات التفاعلي
-    if prompt := st.chat_input("اكتب أمرك أو سؤالك هنا..."):
-      # إضافة رسالة المستخدم وسجلها
+    # استقبال رسالة المستخدم الجديدة
+    if prompt := st.chat_input("اكتب أمرك أو سؤالك هنا (مثلاً: ابحث لي عن...):"):
       st.session_state.messages.append({"role": "user", "content": prompt})
       with st.chat_message("user"):
         st.markdown(prompt)
 
-      # توليد الرد من نموذج OpenAI
-      try:
-        client = OpenAI(api_key=openai_api_key)
-        with st.chat_message("assistant"):
-          with st.spinner("جاري تنفيذ الأمر..."):
-            response = client.chat.completions.create(
-                model="gpt-4o-mini", messages=st.session_state.messages
+      # فحص ما إذا كان المستخدم يطلب بحثاً أو استعلاماً يتطلب الإنترنت
+      with st.spinner("جاري معالجة الطلب والبحث في الإنترنت..."):
+        search_keywords = [
+            "ابحث",
+            "بحث",
+            "أحدث",
+            "معلومات",
+            "سعر",
+            "اخبار",
+            "اعطيني",
+            "ما هو",
+        ]
+        # إذا طلب المستخدم بحثاً، نقوم بجلب النتائج وإضافتها للسياق
+        additional_context = ""
+        if any(keyword in prompt for keyword in search_keywords):
+          search_results = web_search(prompt)
+          if search_results:
+            additional_context = (
+                f"\n\n[معلومات مسترجعة من الإنترنت بناءً على طلبك]:\n{search_results}"
             )
-            bot_reply = response.choices[0].message.content
+
+        # دمج نتائج البحث إن وجدت مع رسالة المستخدم للنموذج
+        messages_to_send = list(st.session_state.messages)
+        if additional_context:
+          messages_to_send[-1]["content"] += additional_context
+
+        try:
+          client = OpenAI(api_key=openai_api_key)
+          response = client.chat.completions.create(
+              model="gpt-4o-mini", messages=messages_to_send
+          )
+          bot_reply = response.choices[0].message.content
+
+          with st.chat_message("assistant"):
             st.markdown(bot_reply)
 
-          # حفظ رد المساعد في السجل
           st.session_state.messages.append(
               {"role": "assistant", "content": bot_reply}
           )
-      except Exception as e:
-        st.error(f"حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: {e}")
+        except Exception as e:
+          st.error(f"حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: {e}")
 
 # 6. فرص جني المال
 elif menu == "فرص جني المال":
