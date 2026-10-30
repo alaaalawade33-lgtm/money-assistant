@@ -1,182 +1,197 @@
 import json
 import os
-from datetime import datetime
 import streamlit as st
-import requests
+from openai import OpenAI
 
-st.set_page_config(page_title="AI Money Assistant", page_icon="💰", layout="centered")
-
-FILE_NAME = "money_data.json"
-PROFILE_FILE = "income_profile.json"
-OPENAI_MODEL = "gpt-4o-mini"
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-
-
-CATEGORIES = ["طعام", "مواصلات", "تسوق", "فواتير", "ترفيه", "صحة", "تعليم", "أخرى"]
-
-def load_data():
-    if os.path.exists(FILE_NAME):
-        try:
-            with open(FILE_NAME, "r", encoding="utf-8") as file:
-                data = json.load(file)
-        except (json.JSONDecodeError, OSError):
-            data = {}
-    else:
-        data = {}
-    data.setdefault("income", 0)
-    data.setdefault("expenses", [])
-    return data
-
-def save_data(data):
-    with open(FILE_NAME, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=4)
-
-def load_profile():
-    default = {"skills": "", "hours": 5, "capital": 0, "mode": "عن بُعد", "target": 1000}
-    if os.path.exists(PROFILE_FILE):
-        try:
-            with open(PROFILE_FILE, "r", encoding="utf-8") as file:
-                default.update(json.load(file))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return default
-
-def save_profile(profile):
-    with open(PROFILE_FILE, "w", encoding="utf-8") as file:
-        json.dump(profile, file, ensure_ascii=False, indent=4)
-
-data = load_data()
-profile = load_profile()
-
-st.title("💰 مساعد الدخل الذكي")
-
-# القائمة الجانبية المحدثة لتشمل الذكاء الاصطناعي وفرص المال
-menu = st.sidebar.selectbox(
-    "القائمة الرئيسية", 
-    ["🏠 الرئيسية", "➕ إضافة مصروف", "📋 سجل المصروفات", "⚙️ تعديل الدخل", "🤖 مساعد الذكاء الاصطناعي", "🚀 فرص جني المال"]
+# إعداد الصفحة
+st.set_page_config(
+    page_title="مساعد الدخل الذكي", page_icon="💰", layout="centered"
 )
 
-# 1. الرئيسية
-if menu == "🏠 الرئيسية":
-    income = float(data.get("income", 0))
-    total_expenses = sum(float(e.get("amount", 0)) for e in data.get("expenses", []))
-    balance = income - total_expenses
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("الدخل", f"{income:.2f} ر.س")
-    col2.metric("المصروفات", f"{total_expenses:.2f} ر.س")
-    col3.metric("المتبقي", f"{balance:.2f} ر.س", delta_color="inverse")
-    
-    st.divider()
-    st.subheader("📊 ملخص سريع")
-    if data.get("expenses"):
-        st.write(f"إجمالي عدد العمليات المسجلة: {len(data['expenses'])} عمليات.")
-        by_cat = {}
-        for e in data["expenses"]:
-            c = e.get("category", "أخرى")
-            by_cat[c] = by_cat.get(c, 0) + float(e.get("amount", 0))
-        for cat, amount in by_cat.items():
-            st.write(f"- **{cat}**: {amount:.2f} ر.س")
-    else:
-        st.info("لا توجد مصروفات مسجلة حتى الآن.")
+FILE_NAME = "money_data.json"
+
+
+# تحميل البيانات المالية
+def load_data():
+  if os.path.exists(FILE_NAME):
+    try:
+      with open(FILE_NAME, "r", encoding="utf-8") as file:
+        return json.load(file)
+    except (json.JSONDecodeError, OSError):
+      pass
+  return {"income": 0.0, "expenses": []}
+
+
+# حفظ البيانات المالية
+def save_data(data):
+  with open(FILE_NAME, "w", encoding="utf-8") as file:
+    json.dump(data, file, ensure_ascii=False, indent=4)
+
+
+# تهيئة البيانات
+if "data" not in st.session_state:
+  st.session_state.data = load_data()
+
+data = st.session_state.data
+
+# قراءة مفتاح OpenAI بأمان من إعدادات Streamlit Secrets
+openai_api_key = None
+try:
+  if "OPENAI_API_KEY" in st.secrets:
+    openai_api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+  pass
+
+# العنوان الرئيسي
+st.title("💰 مساعد الدخل الذكي")
+
+# القائمة الجانبية للتنقل
+menu = st.sidebar.selectbox(
+    "القائمة الرئيسية",
+    [
+        "الرئيسية",
+        "إضافة مصروف",
+        "سجل المصروفات",
+        "تعديل الدخل",
+        "مساعد الذكاء الاصطناعي (شات)",
+        "فرص جني المال",
+    ],
+)
+
+# حساب المجموع
+total_income = data.get("income", 0.0)
+total_expenses = sum(item["amount"] for item in data.get("expenses", []))
+remaining = total_income - total_expenses
+
+# 1. الصفحة الرئيسية
+if menu == "الرئيسية":
+  st.subheader("📊 ملخص الميزانية")
+  col1, col2 = st.columns(2)
+  with col1:
+    st.metric(label="إجمالي الدخل", value=f"{total_income:,.2f} ر.س")
+  with col2:
+    st.metric(label="إجمالي المصروفات", value=f"{total_expenses:,.2f} ر.س")
+
+  st.metric(label="المبلغ المتبقي", value=f"{remaining:,.2f} ر.س")
+
+  st.markdown("---")
+  st.markdown("### ⚡ ملخص سريع")
+  st.write(f"• إجمالي عدد العمليات المسجلة: {len(data['expenses'])} عمليات")
 
 # 2. إضافة مصروف
-elif menu == "➕ إضافة مصروف":
-    st.subheader("إضافة مصروف جديد")
-    with st.form("expense_form"):
-        name = st.text_input("اسم المصروف (مثال: وجبة غداء)")
-        amount = st.number_input("المبلغ (بالريال)", min_value=0.0, step=1.0)
-        category = st.selectbox("التصنيف", CATEGORIES)
-        submit = st.form_submit_button("حفظ المصروف")
-        
-        if submit:
-            if name and amount > 0:
-                new_exp = {
-                    "name": name,
-                    "amount": amount,
-                    "category": category,
-                    "date": datetime.now().strftime("%Y-%m-%d")
-                }
-                data["expenses"].append(new_exp)
-                save_data(data)
-                st.success("تم حفظ المصروف بنجاح! ✅")
-            else:
-                st.warning("الرجاء إدخال اسم صحيح ومبلغ أكبر من الصفر.")
+elif menu == "إضافة مصروف":
+  st.subheader("➕ تسجيل مصروف جديد")
+  with st.form("expense_form"):
+    title = st.text_input("اسم المصروف أو البند")
+    amount = st.number_input("المبلغ (ر.س)", min_value=0.0, step=1.0)
+    category = st.selectbox(
+        "التصنيف", ["طعام", "مواصلات", "فواتير", "تسوّق", "أخرى"]
+    )
+    submit = st.form_submit_button("حفظ المصروف")
+
+    if submit:
+      if title and amount > 0:
+        data["expenses"].append(
+            {"title": title, "amount": amount, "category": category}
+        )
+        save_data(data)
+        st.success("تم إضافة المصروف بنجاح!")
+      else:
+        st.warning("الرجاء إدخال اسم صحيح ومبلغ أكبر من الصفر.")
 
 # 3. سجل المصروفات
-elif menu == "📋 سجل المصروفات":
-    st.subheader("سجل المصروفات السابقة")
-    if data.get("expenses"):
-        for i, e in enumerate(data["expenses"]):
-            st.write(f"**{i+1}. {e.get('name')}** — {e.get('amount')} ر.س ({e.get('category')}) [التاريخ: {e.get('date')}]")
-        
-        if st.button("🗑️ حذف آخر مصروف"):
-            data["expenses"].pop()
-            save_data(data)
-            st.rerun()
-    else:
-        st.info("لا توجد مصروفات مسجلة.")
+elif menu == "سجل المصروفات":
+  st.subheader("📋 سجل العمليات السابقة")
+  expenses = data.get("expenses", [])
+  if not expenses:
+    st.info("لا توجد مصروفات مسجلة حتى الآن.")
+  else:
+    for i, exp in enumerate(reversed(expenses)):
+      st.write(
+          f"🔹 **{exp['title']}** - {exp['amount']} ر.س ({exp['category']})"
+      )
+
+    if st.button("حذف أحدث مصروف أُضيف"):
+      data["expenses"].pop()
+      save_data(data)
+      st.success("تم حذف آخر عملية بنجاح!")
+      st.rerun()
 
 # 4. تعديل الدخل
-elif menu == "⚙️ تعديل الدخل":
-    st.subheader("تحديث الدخل الشهري")
-    new_income = st.number_input("أدخل دخلك الشهري الجديد (ريال):", value=float(data.get("income", 0)), step=100.0)
-    if st.button("تحديث الدخل"):
-        data["income"] = new_income
-        save_data(data)
-        st.success("تم تحديث الدخل بنجاح! ✅")
+elif menu == "تعديل الدخل":
+  st.subheader("⚙️ تحديث الدخل الشهري")
+  new_income = st.number_input(
+      "قيمة الدخل الجديدة (ر.س)", value=float(total_income), step=100.0
+  )
+  if st.button("تحديث الدخل"):
+    data["income"] = new_income
+    save_data(data)
+    st.success("تم تحديث الدخل بنجاح!")
+    st.rerun()
 
-# 5. مساعد الذكاء الاصطناعي
-elif menu == "🤖 مساعد الذكاء الاصطناعي":
-    st.subheader("🤖 اسأل مساعد الذكاء الاصطناعي")
-    st.write("استشر المساعد في تحسين ميزانيتك، تسعير خدماتك، أو تقليل المصروفات.")
-    
-    question = st.text_input("اكتب سؤالك هنا:", value="اقترح لي طريقة لتقليل مصاريفي بناءً على دخلي الحالي")
-    if st.button("إرسال للسؤال"):
-        if OPENAI_API_KEY and OPENAI_API_KEY != "sk-...":
-            with st.spinner("جاري التفكير والرد..."):
-                try:
-                    income = float(data.get("income", 0))
-                    total_exp = sum(float(e.get("amount", 0)) for e in data.get("expenses", []))
-                    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-                    payload = {
-                        "model": OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": f"أنت مساعد مالي ذكي. دخل المستخدم {income} ريال ومصروفاته {total_exp} ريال."},
-                            {"role": "user", "content": question}
-                        ]
-                    }
-                    res = requests.post(OPENAI_URL, headers=headers, json=payload, timeout=25)
-                    if res.status_code == 200:
-                        answer = res.json()['choices'][0]['message']['content']
-                        st.info(answer)
-                    else:
-                        st.error("⚠️ خطأ في الاستجابة من خادم الذكاء الاصطناعي.")
-                except Exception as ex:
-                    st.error(f"⚠️ خطأ في الاتصال: {ex}")
-        else:
-            st.warning("⚠️ مفتاح OpenAI API غير مضبوط في الكود.")
+# 5. مساعد الذكاء الاصطناعي (شات متواصل)
+elif menu == "مساعد الذكاء الاصطناعي (شات)":
+  st.subheader("🤖 الشات الذكي مع المساعد المالي")
+  st.write(
+      "تحدث بحرية واسأل عن ميزانيتك أو أفكار لزيادة الدخل؛ المحادثة مستمرة ولا"
+      " تُحذف أثناء تنقلك في الشات."
+  )
+
+  if not openai_api_key:
+    st.warning(
+        "⚠️ مفتاح OpenAI API غير مضبوط في إعدادات Streamlit Secrets. يرجى"
+        " إضافته من لوحة التحكم."
+    )
+  else:
+    # تهيئة سجل رسائل الشات في الجلسة إذا لمש يكن موجوداً
+    if "messages" not in st.session_state:
+      st.session_state.messages = [{
+          "role": "system",
+          "content": (
+              "أنت مساعد مالي ذكي ومحترف تساعد المستخدم علاء في إدارة أمواله"
+              " وزيادة دخله وتقديم أفكار مشاريع رقمية."
+          ),
+      }]
+
+    # عرض الرسائل السابقة في الشات (باستثناء رسالة الـ system)
+    for message in st.session_state.messages:
+      if message["role"] != "system":
+        with st.chat_message(message["role"]):
+          st.markdown(message["content"])
+
+    # استقبال رسالة المستخدم الجديدة عبر شريط الشات التفاعلي
+    if prompt := st.chat_input("اكتب رسالتك أو سؤالك هنا..."):
+      # إضافة رسالة المستخدم وسجلها
+      st.session_state.messages.append({"role": "user", "content": prompt})
+      with st.chat_message("user"):
+        st.markdown(prompt)
+
+      # توليد الرد من نموذج OpenAI
+      try:
+        client = OpenAI(api_key=openai_api_key)
+        with st.chat_message("assistant"):
+          with st.spinner("جاري التفكير والكتابة..."):
+            response = client.chat.completions.create(
+                model="gpt-4o-mini", messages=st.session_state.messages
+            )
+            bot_reply = response.choices[0].message.content
+            st.markdown(bot_reply)
+
+          # حفظ رد المساعد في السجل
+          st.session_state.messages.append(
+              {"role": "assistant", "content": bot_reply}
+          )
+      except Exception as e:
+        st.error(f"حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: {e}")
 
 # 6. فرص جني المال
-elif menu == "🚀 فرص جني المال":
-    st.subheader("🚀 المساعد الذكي لجني الأموال")
-    skills = st.text_input("مهاراتك (مثال: برمجة، تصميم، كتابة):", value=profile.get("skills", ""))
-    hours = st.number_input("ساعات العمل أسبوعياً:", value=int(profile.get("hours", 5)))
-    capital = st.number_input("رأس المال المتاح (ريال):", value=float(profile.get("capital", 0)))
-    target = st.number_input("الهدف الشهري المرغوب (ريال):", value=float(profile.get("target", 1000)))
-    mode = st.selectbox("طريقة العمل المفضلة:", ["عن بُعد", "حضوري", "كلاهما"], index=0 if profile.get("mode")=="عن بُعد" else 1)
-    
-    if st.button("حفظ وتوليد خطة الأفكار"):
-        profile = {"skills": skills, "hours": hours, "capital": capital, "mode": mode, "target": target}
-        save_profile(profile)
-        st.success("تم حفظ ملفك الشخصي بنجاح! ✅")
-        
-        st.markdown("### 💡 أفكار مقترحة بناءً على مهاراتك:")
-        if "برمجة" in skills or "python" in skills.lower():
-            st.write("• **تطوير أدوات مصغرة للشركات والأفراد:** تقديم سكريبتات أو أدوات أتمتة بسيطة.")
-        elif "تصميم" in skills or "تصميم" in skills:
-            st.write("• **تصميم محتوى المنصات الرقمية:** تصميم تصاميم مخصصة للأعمال الناشئة.")
-        else:
-            st.write("• **تقديم خدمات رقمية مصغرة:** استغلال مهاراتك في تقديم خدمات مستقلة عبر الإنترنت.")
-        st.write(f"🎯 لهدف شهري بقيمة {target} ريال، حاول تحقيق ما يقارب {target/4:.0f} ريال أسبوعياً.")
+elif menu == "فرص جني المال":
+  st.subheader("🚀 أفكار لزيادة دخلك")
+  st.write(
+      "بناءً على تحليلي لميزانيتك ومصاريفك، يمكنك استغلال مهاراتك الرقمية أو"
+      " تقديم استشارات جانبية لزيادة التدفق النقدي."
+  )
+  st.info(
+      "💡 نصيحة: حاول توجيه 20% من فائض دخلك نحو الادخار أو الاستثمار الرقمي"
+      " المصغر."
+  )
